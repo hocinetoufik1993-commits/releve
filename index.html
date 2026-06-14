@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
-  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="Relevé JL" />
   <title>Relevé JL</title>
@@ -13,399 +13,388 @@
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     body { background: #f0f4f8; font-family: -apple-system, 'Segoe UI', Arial, sans-serif; }
-    input, button, textarea { font-family: inherit; }
-    .field-input {
-      width: 100%; box-sizing: border-box; padding: 11px 12px;
-      font-size: 16px; border: 1.5px solid #dde3ea; border-radius: 8px;
-      background: #f8fafc; color: #1a2a3a; outline: none;
-      -webkit-appearance: none;
-    }
-    .field-input:focus { border-color: #2196f3; background: #fff; }
+    input, button { font-family: inherit; }
+    .finput { width: 100%; box-sizing: border-box; padding: 11px 12px; font-size: 16px; border: 1.5px solid #dde3ea; border-radius: 8px; background: #f8fafc; color: #1a2a3a; outline: none; -webkit-appearance: none; }
+    .finput:focus { border-color: #2196f3; background: #fff; }
   </style>
 </head>
 <body>
-  <div id="root"></div>
-  <script type="text/babel">
-    const { useState, useEffect, useRef, useCallback } = React;
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback, memo } = React;
 
-    const JOURS = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Sam/Dim"];
-    const STORAGE_KEY = "plomberieJL_v4";
-    const HEURES = Array.from({ length: 24 }, (_, i) => i.toString().padStart(2, "0"));
-    const MINUTES = ["00", "15", "30", "45"];
+const JOURS = ["Lundi","Mardi","Mercredi","Jeudi","Vendredi","Sam/Dim"];
+const STORAGE_KEY = "plomberieJL_v5";
+const HEURES = Array.from({length:24},(_,i)=>i.toString().padStart(2,"0"));
+const MINUTES = ["00","15","30","45"];
 
-    const newTache = () => ({ id: Math.random().toString(36).slice(2), chantier: "", description: "", heureDebut: "", heureFin: "" });
-    const initialJour = () => ({ pauseMatin: false, diner: false, pauseApm: false, taches: [newTache()] });
-    const defaultInfo = { nom: "", semaineDebut: "", semaineFin: "", emailDestinataire: "" };
+const mkTache = () => ({ id: Math.random().toString(36).slice(2), chantier:"", description:"", heureDebut:"", heureFin:"" });
+const mkJour = () => ({ pauseMatin:false, diner:false, pauseApm:false, taches:[mkTache()] });
+const mkInfo = () => ({ nom:"", semaineDebut:"", semaineFin:"", email:"" });
 
-    // Stable field component - never re-renders parent on each keystroke
-    const StableInput = React.memo(({ label, value, onBlur, type="text", placeholder="" }) => {
-      const [local, setLocal] = useState(value);
-      useEffect(() => { setLocal(value); }, [value]);
-      return (
-        <div style={{ marginBottom: 13 }}>
-          {label && <label style={{ display:"block", fontSize:12, fontWeight:600, color:"#5a6a7a", marginBottom:4, textTransform:"uppercase", letterSpacing:"0.05em" }}>{label}</label>}
-          <input
-            className="field-input"
-            type={type}
-            value={local}
-            onChange={e => setLocal(e.target.value)}
-            onBlur={e => onBlur(e.target.value)}
-            placeholder={placeholder}
-          />
+const Field = memo(({ label, value, onSave, type="text", placeholder="" }) => {
+  const [v, setV] = useState(value);
+  useEffect(() => setV(value), [value]);
+  return (
+    <div style={{marginBottom:13}}>
+      {label && <label style={{display:"block",fontSize:12,fontWeight:600,color:"#5a6a7a",marginBottom:4,textTransform:"uppercase",letterSpacing:"0.05em"}}>{label}</label>}
+      <input className="finput" type={type} value={v} placeholder={placeholder}
+        onChange={e => setV(e.target.value)}
+        onBlur={e => onSave(e.target.value)} />
+    </div>
+  );
+});
+
+function Drum({ items, selected, onSelect }) {
+  const ref = useRef();
+  const H = 48;
+  useEffect(() => {
+    const i = items.indexOf(selected);
+    if (ref.current) ref.current.scrollTop = i * H;
+  }, []);
+  const onScroll = () => {
+    const i = Math.round(ref.current.scrollTop / H);
+    onSelect(items[Math.max(0, Math.min(i, items.length-1))]);
+  };
+  return (
+    <div ref={ref} onScroll={onScroll} style={{height:H*5,overflowY:"scroll",width:90,textAlign:"center",scrollSnapType:"y mandatory",WebkitOverflowScrolling:"touch"}}>
+      <div style={{height:H*2}} />
+      {items.map(it => (
+        <div key={it} onClick={() => { onSelect(it); ref.current.scrollTop = items.indexOf(it)*H; }}
+          style={{height:H,lineHeight:H+"px",fontSize:it===selected?32:22,fontWeight:it===selected?700:400,color:it===selected?"#1a2a3a":"#bbb",scrollSnapAlign:"center",cursor:"pointer"}}>
+          {it}
         </div>
-      );
-    });
+      ))}
+      <div style={{height:H*2}} />
+    </div>
+  );
+}
 
-    function TimePicker({ value, onChange, onClose }) {
-      const initH = value ? value.split(":")[0] : "07";
-      const initM = value ? value.split(":")[1] : "00";
-      const [selH, setSelH] = useState(initH);
-      const [selM, setSelM] = useState(initM);
-      const confirm = () => { onChange(`${selH}:${selM}`); onClose(); };
-
-      function Drum({ items, selected, onSelect }) {
-        const ref = useRef();
-        const ITEM_H = 48;
-        useEffect(() => {
-          const idx = items.indexOf(selected);
-          if (ref.current) ref.current.scrollTop = idx * ITEM_H;
-        }, []);
-        const onScroll = () => {
-          const idx = Math.round(ref.current.scrollTop / ITEM_H);
-          onSelect(items[Math.max(0, Math.min(idx, items.length - 1))]);
-        };
-        return (
-          <div ref={ref} onScroll={onScroll} style={{ height: ITEM_H*5, overflowY:"scroll", width:90, textAlign:"center", scrollSnapType:"y mandatory", WebkitOverflowScrolling:"touch", position:"relative" }}>
-            <div style={{ height: ITEM_H*2 }} />
-            {items.map(it => (
-              <div key={it} onClick={() => { onSelect(it); ref.current.scrollTop = items.indexOf(it)*ITEM_H; }}
-                style={{ height:ITEM_H, lineHeight:`${ITEM_H}px`, fontSize:it===selected?32:22, fontWeight:it===selected?700:400, color:it===selected?"#1a2a3a":"#bbb", scrollSnapAlign:"center", cursor:"pointer" }}>
-                {it}
-              </div>
-            ))}
-            <div style={{ height: ITEM_H*2 }} />
-          </div>
-        );
-      }
-
-      return (
-        <div style={{ position:"fixed", inset:0, background:"#0008", zIndex:200, display:"flex", alignItems:"flex-end" }}>
-          <div style={{ background:"#fff", width:"100%", borderRadius:"16px 16px 0 0" }}>
-            <div style={{ display:"flex", justifyContent:"space-between", padding:"16px 20px", borderBottom:"1px solid #eee" }}>
-              <button onClick={onClose} style={{ background:"none", border:"none", fontSize:17, color:"#888", cursor:"pointer" }}>Annuler</button>
-              <div style={{ fontSize:24, fontWeight:700, color:"#1a2a3a" }}>{selH}:{selM}</div>
-              <button onClick={confirm} style={{ background:"none", border:"none", fontSize:17, color:"#1565c0", fontWeight:700, cursor:"pointer" }}>OK</button>
-            </div>
-            <div style={{ display:"flex", justifyContent:"center", alignItems:"center", padding:"10px 0 20px", position:"relative" }}>
-              <div style={{ position:"absolute", top:"50%", left:"50%", transform:"translate(-50%,-50%)", width:200, height:48, background:"#f0f4f8", borderRadius:10, zIndex:0 }} />
-              <Drum items={HEURES} selected={selH} onSelect={setSelH} />
-              <div style={{ fontSize:32, fontWeight:700, color:"#1a2a3a", zIndex:1, margin:"0 4px" }}>:</div>
-              <Drum items={MINUTES} selected={selM} onSelect={setSelM} />
-            </div>
-          </div>
+function TimePicker({ value, onChange, onClose }) {
+  const [h, setH] = useState(value ? value.split(":")[0] : "07");
+  const [m, setM] = useState(value ? value.split(":")[1] : "00");
+  return (
+    <div style={{position:"fixed",inset:0,background:"#0008",zIndex:200,display:"flex",alignItems:"flex-end"}}>
+      <div style={{background:"#fff",width:"100%",borderRadius:"16px 16px 0 0"}}>
+        <div style={{display:"flex",justifyContent:"space-between",padding:"16px 20px",borderBottom:"1px solid #eee"}}>
+          <button onClick={onClose} style={{background:"none",border:"none",fontSize:17,color:"#888",cursor:"pointer"}}>Annuler</button>
+          <div style={{fontSize:24,fontWeight:700,color:"#1a2a3a"}}>{h}:{m}</div>
+          <button onClick={() => { onChange(h+":"+m); onClose(); }} style={{background:"none",border:"none",fontSize:17,color:"#1565c0",fontWeight:700,cursor:"pointer"}}>OK</button>
         </div>
-      );
-    }
-
-    function TimeField({ label, value, onChange }) {
-      const [open, setOpen] = useState(false);
-      return (
-        <>
-          {open && <TimePicker value={value} onChange={onChange} onClose={() => setOpen(false)} />}
-          <div style={{ flex:1 }}>
-            <label style={{ display:"block", fontSize:12, fontWeight:600, color:"#5a6a7a", marginBottom:4, textTransform:"uppercase", letterSpacing:"0.05em" }}>{label}</label>
-            <div onClick={() => setOpen(true)} style={{ padding:"13px 12px", fontSize:24, fontWeight:700, border:"1.5px solid #dde3ea", borderRadius:8, background:value?"#f0f8ff":"#f8fafc", color:value?"#1a2a3a":"#ccc", cursor:"pointer", textAlign:"center", minHeight:56, display:"flex", alignItems:"center", justifyContent:"center" }}>
-              {value || "––:––"}
-            </div>
-          </div>
-        </>
-      );
-    }
-
-    function App() {
-      const [step, setStep] = useState("info");
-      const [info, setInfo] = useState(defaultInfo);
-      const [jours, setJours] = useState(Object.fromEntries(JOURS.map(j => [j, initialJour()])));
-      const [jourActif, setJourActif] = useState(JOURS[0]);
-      const [tacheActive, setTacheActive] = useState(null);
-      const [showEmailModal, setShowEmailModal] = useState(false);
-      const [copied, setCopied] = useState(false);
-
-      useEffect(() => {
-        try {
-          const saved = localStorage.getItem(STORAGE_KEY);
-          if (saved) { const d = JSON.parse(saved); if (d.info) setInfo(d.info); if (d.jours) setJours(d.jours); }
-        } catch(e) {}
-      }, []);
-
-      // Save to localStorage with debounce
-      const saveTimer = useRef(null);
-      useEffect(() => {
-        clearTimeout(saveTimer.current);
-        saveTimer.current = setTimeout(() => {
-          try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ info, jours })); } catch(e) {}
-        }, 800);
-      }, [info, jours]);
-
-      const calcMinsTache = t => {
-        if (!t.heureDebut || !t.heureFin) return 0;
-        const [dh,dm] = t.heureDebut.split(":").map(Number);
-        const [fh,fm] = t.heureFin.split(":").map(Number);
-        return Math.max(0,(fh*60+fm)-(dh*60+dm));
-      };
-      const calcMinsJour = j => {
-        const jour = jours[j];
-        let total = jour.taches.reduce((a,t) => a+calcMinsTache(t), 0);
-        if (jour.pauseMatin) total -= 15;
-        if (jour.diner) total -= 30;
-        if (jour.pauseApm) total -= 15;
-        return Math.max(0, total);
-      };
-      const fmt = mins => mins > 0 ? `${Math.floor(mins/60)}h${(mins%60).toString().padStart(2,"0")}` : null;
-      const fmtTache = t => fmt(calcMinsTache(t));
-      const heuresJour = j => fmt(calcMinsJour(j));
-      const totalHeures = () => { const t = JOURS.reduce((a,j) => a+calcMinsJour(j),0); return `${Math.floor(t/60)}h${(t%60).toString().padStart(2,"0")}`; };
-
-      const updateInfo = useCallback((field, val) => setInfo(p => ({...p,[field]:val})), []);
-      const updateJour = useCallback((jour, field, value) => setJours(p => ({...p,[jour]:{...p[jour],[field]:value}})), []);
-      const updateTache = useCallback((jour, id, field, value) => setJours(p => ({...p,[jour]:{...p[jour],taches:p[jour].taches.map(t => t.id===id?{...t,[field]:value}:t)}})), []);
-      const ajouterTache = jour => { const t = newTache(); setJours(p => ({...p,[jour]:{...p[jour],taches:[...p[jour].taches,t]}})); setTacheActive({jour,tacheId:t.id}); };
-      const supprimerTache = (jour,id) => { setJours(p => { const taches = p[jour].taches.filter(t => t.id!==id); return {...p,[jour]:{...p[jour],taches:taches.length?taches:[newTache()]}}; }); setTacheActive(null); };
-
-      const genererCorps = () => {
-        const L = "─".repeat(48);
-        let c = `RELEVÉ HEBDOMADAIRE — Plomberie JL\n${L}\n\nNom : ${info.nom}\nSemaine du ${info.semaineDebut} au ${info.semaineFin}\n\n${L}\n`;
-        JOURS.forEach(j => {
-          const jour = jours[j]; const h = heuresJour(j);
-          const actives = jour.taches.filter(t => t.chantier||t.heureDebut);
-          if (!actives.length) return;
-          c += `\n▸ ${j.toUpperCase()}  (${h||"—"})\n`;
-          actives.forEach((t,i) => {
-            c += `\n  ${i+1}. ${t.chantier||"—"}\n`;
-            if (t.description) c += `     ${t.description}\n`;
-            if (t.heureDebut&&t.heureFin) c += `     ${t.heureDebut} → ${t.heureFin}  (${fmtTache(t)||"—"})\n`;
-          });
-          const pauses = [];
-          if (jour.pauseMatin) pauses.push("Pause matin 15min");
-          if (jour.diner) pauses.push("Dîner 30min");
-          if (jour.pauseApm) pauses.push("Pause a-m 15min");
-          if (pauses.length) c += `\n  Pauses : ${pauses.join(", ")}\n`;
-        });
-        c += `\n${L}\nTOTAL : ${totalHeures()}\n`;
-        return c;
-      };
-
-      const envoyerCourriel = () => {
-        const sujet = `Relevé heures — ${info.nom} — Semaine du ${info.semaineDebut}`;
-        const corps = genererCorps();
-        const gmailUrl = `https://mail.google.com/mail/?view=cm&to=${encodeURIComponent(info.emailDestinataire)}&su=${encodeURIComponent(sujet)}&body=${encodeURIComponent(corps)}`;
-        window.open(gmailUrl, "_blank");
-        setShowEmailModal(false);
-      };
-
-      const CopiedBanner = () => copied ? (
-        <div style={{position:"fixed",top:0,left:0,right:0,zIndex:300,background:"#2e7d32",color:"#fff",textAlign:"center",padding:"14px",fontSize:15,fontWeight:700}}>
-          ✓ Relevé copié! Ouvre Gmail et colle-le.
+        <div style={{display:"flex",justifyContent:"center",alignItems:"center",padding:"10px 0 20px",position:"relative"}}>
+          <div style={{position:"absolute",top:"50%",left:"50%",transform:"translate(-50%,-50%)",width:200,height:48,background:"#f0f4f8",borderRadius:10,zIndex:0}} />
+          <Drum items={HEURES} selected={h} onSelect={setH} />
+          <div style={{fontSize:32,fontWeight:700,color:"#1a2a3a",zIndex:1,margin:"0 4px"}}>:</div>
+          <Drum items={MINUTES} selected={m} onSelect={setM} />
         </div>
-      ) : null;
+      </div>
+    </div>
+  );
+}
 
-      const Card = ({children,mb=12}) => <div style={{background:"#fff",borderRadius:12,padding:16,marginBottom:mb,boxShadow:"0 1px 4px #0001"}}>{children}</div>;
-      const CardTitle = ({children}) => <div style={{fontSize:13,fontWeight:700,color:"#1a2a3a",marginBottom:12,borderBottom:"1px solid #eee",paddingBottom:8}}>{children}</div>;
-      const Toggle = ({label,checked,onChange}) => (
-        <div onClick={() => onChange(!checked)} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"11px 14px",background:checked?"#e8f4fd":"#f8fafc",border:`1.5px solid ${checked?"#2196f3":"#dde3ea"}`,borderRadius:8,marginBottom:8,cursor:"pointer"}}>
-          <span style={{fontSize:14,color:"#1a2a3a",fontWeight:500}}>{label}</span>
-          <div style={{width:40,height:22,borderRadius:11,background:checked?"#2196f3":"#ccd5de",position:"relative"}}>
-            <div style={{position:"absolute",top:3,left:checked?20:3,width:16,height:16,borderRadius:"50%",background:"#fff",transition:"left 0.2s"}} />
-          </div>
+function TimeField({ label, value, onChange }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      {open && <TimePicker value={value} onChange={onChange} onClose={() => setOpen(false)} />}
+      <div style={{flex:1}}>
+        <label style={{display:"block",fontSize:12,fontWeight:600,color:"#5a6a7a",marginBottom:4,textTransform:"uppercase",letterSpacing:"0.05em"}}>{label}</label>
+        <div onClick={() => setOpen(true)} style={{padding:"13px 12px",fontSize:24,fontWeight:700,border:"1.5px solid #dde3ea",borderRadius:8,background:value?"#f0f8ff":"#f8fafc",color:value?"#1a2a3a":"#ccc",cursor:"pointer",textAlign:"center",minHeight:56,display:"flex",alignItems:"center",justifyContent:"center"}}>
+          {value || "––:––"}
         </div>
-      );
+      </div>
+    </>
+  );
+}
 
-      const EmailModal = () => (
-        <div style={{position:"fixed",inset:0,background:"#0007",zIndex:100,display:"flex",alignItems:"flex-end"}}>
-          <div style={{background:"#fff",borderRadius:"16px 16px 0 0",padding:20,width:"100%",boxSizing:"border-box"}}>
-            <div style={{fontSize:16,fontWeight:700,marginBottom:4}}>📧 Envoyer par courriel</div>
-            <div style={{fontSize:13,color:"#5a6a7a",marginBottom:16}}>Le relevé complet sera dans le message.</div>
-            <StableInput label="Courriel du destinataire" value={info.emailDestinataire} onBlur={v => updateInfo("emailDestinataire",v)} type="email" placeholder="bureau@plomberiejl.com" />
-            <button onClick={envoyerCourriel} style={{width:"100%",padding:14,background:"#1565c0",color:"#fff",border:"none",borderRadius:10,fontSize:15,fontWeight:700,cursor:"pointer",marginBottom:10}}>📋 Copier le relevé</button>
-            <div style={{fontSize:12,color:"#5a6a7a",textAlign:"center",marginBottom:10}}>Ensuite ouvre Gmail et colle (appui long → Coller)</div>
-            <a href={`https://mail.google.com/mail/?view=cm&to=${encodeURIComponent(info.emailDestinataire)}&su=${encodeURIComponent("Relevé heures — "+info.nom)}`} target="_blank" style={{display:"block",width:"100%",padding:12,background:"#ea4335",color:"#fff",border:"none",borderRadius:10,fontSize:14,fontWeight:700,cursor:"pointer",marginBottom:10,textAlign:"center",textDecoration:"none",boxSizing:"border-box"}}>📧 Ouvrir Gmail</a>
-            <button onClick={() => setShowEmailModal(false)} style={{width:"100%",padding:12,background:"#f0f4f8",color:"#5a6a7a",border:"1.5px solid #dde3ea",borderRadius:10,fontSize:14,fontWeight:600,cursor:"pointer"}}>Annuler</button>
-          </div>
-        </div>
-      );
+const Card = ({children,mb=12}) => <div style={{background:"#fff",borderRadius:12,padding:16,marginBottom:mb,boxShadow:"0 1px 4px #0001"}}>{children}</div>;
+const Title = ({children}) => <div style={{fontSize:13,fontWeight:700,color:"#1a2a3a",marginBottom:12,borderBottom:"1px solid #eee",paddingBottom:8}}>{children}</div>;
+const Toggle = ({label,checked,onChange}) => (
+  <div onClick={() => onChange(!checked)} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"11px 14px",background:checked?"#e8f4fd":"#f8fafc",border:"1.5px solid "+(checked?"#2196f3":"#dde3ea"),borderRadius:8,marginBottom:8,cursor:"pointer"}}>
+    <span style={{fontSize:14,color:"#1a2a3a",fontWeight:500}}>{label}</span>
+    <div style={{width:40,height:22,borderRadius:11,background:checked?"#2196f3":"#ccd5de",position:"relative"}}>
+      <div style={{position:"absolute",top:3,left:checked?20:3,width:16,height:16,borderRadius:"50%",background:"#fff",transition:"left 0.2s"}} />
+    </div>
+  </div>
+);
 
-      // Tache form as separate component to avoid re-render issues
-      const TacheForm = React.memo(({ t, jour, onUpdate, onClose, onDelete }) => {
-        return (
-          <div style={{position:"fixed",inset:0,background:"#f0f4f8",zIndex:50,overflowY:"auto"}}>
-            <div style={{background:"#1a2a3a",padding:"16px",color:"#fff",display:"flex",alignItems:"center",gap:10}}>
-              <span onClick={onClose} style={{fontSize:24,cursor:"pointer"}}>←</span>
-              <div style={{flex:1}}>
-                <div style={{fontSize:11,opacity:0.6,textTransform:"uppercase"}}>{jour}</div>
-                <div style={{fontSize:16,fontWeight:700}}>{t.chantier||"Nouvelle entrée"}</div>
-              </div>
-              <button onClick={onDelete} style={{background:"#c62828",color:"#fff",border:"none",borderRadius:8,padding:"6px 12px",fontSize:13,cursor:"pointer"}}>Supprimer</button>
-            </div>
-            <div style={{padding:14}}>
-              <Card>
-                <CardTitle>🏗 Chantier</CardTitle>
-                <StableInput label="Nom du chantier" value={t.chantier} onBlur={v => onUpdate("chantier",v)} placeholder="Ex: Résidence Tremblay" />
-                <StableInput label="Description des travaux" value={t.description} onBlur={v => onUpdate("description",v)} placeholder="Ex: Sleevage, raccordement..." />
-              </Card>
-              <Card>
-                <CardTitle>⏰ Heures</CardTitle>
-                <div style={{display:"flex",gap:12,marginBottom:12}}>
-                  <TimeField label="Début" value={t.heureDebut} onChange={v => onUpdate("heureDebut",v)} />
-                  <TimeField label="Fin" value={t.heureFin} onChange={v => onUpdate("heureFin",v)} />
-                </div>
-                {fmt(calcMinsTache(t)) && (
-                  <div style={{background:"#e8f4fd",borderRadius:8,padding:10,textAlign:"center"}}>
-                    <span style={{fontSize:16,color:"#1565c0",fontWeight:700}}>⏱ {fmt(calcMinsTache(t))}</span>
-                  </div>
-                )}
-              </Card>
-              <button onClick={onClose} style={{width:"100%",padding:15,background:"#2e7d32",color:"#fff",border:"none",borderRadius:10,fontSize:16,fontWeight:700,cursor:"pointer"}}>✓ Enregistrer</button>
-            </div>
-          </div>
-        );
+function App() {
+  const [step, setStep] = useState("info");
+  const [info, setInfo] = useState(mkInfo());
+  const [jours, setJours] = useState(Object.fromEntries(JOURS.map(j => [j, mkJour()])));
+  const [jourActif, setJourActif] = useState(JOURS[0]);
+  const [tacheActive, setTacheActive] = useState(null);
+  const [showEmail, setShowEmail] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const saveRef = useRef(null);
+
+  useEffect(() => {
+    try {
+      const s = localStorage.getItem(STORAGE_KEY);
+      if (s) { const d = JSON.parse(s); if(d.info) setInfo(d.info); if(d.jours) setJours(d.jours); }
+    } catch(e) {}
+  }, []);
+
+  useEffect(() => {
+    clearTimeout(saveRef.current);
+    saveRef.current = setTimeout(() => {
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify({info,jours})); } catch(e) {}
+    }, 800);
+  }, [info, jours]);
+
+  const mins = t => {
+    if (!t.heureDebut || !t.heureFin) return 0;
+    const [dh,dm] = t.heureDebut.split(":").map(Number);
+    const [fh,fm] = t.heureFin.split(":").map(Number);
+    return Math.max(0,(fh*60+fm)-(dh*60+dm));
+  };
+  const minsJour = j => {
+    const jr = jours[j];
+    let tot = jr.taches.reduce((a,t)=>a+mins(t),0);
+    if(jr.pauseMatin) tot-=15; if(jr.diner) tot-=30; if(jr.pauseApm) tot-=15;
+    return Math.max(0,tot);
+  };
+  const fmt = m => m>0 ? Math.floor(m/60)+"h"+(m%60).toString().padStart(2,"0") : null;
+  const hJour = j => fmt(minsJour(j));
+  const total = () => { const t=JOURS.reduce((a,j)=>a+minsJour(j),0); return Math.floor(t/60)+"h"+(t%60).toString().padStart(2,"0"); };
+
+  const setInfoF = useCallback((f,v) => setInfo(p=>({...p,[f]:v})),[]);
+  const setJourF = useCallback((j,f,v) => setJours(p=>({...p,[j]:{...p[j],[f]:v}})),[]);
+  const setTacheF = useCallback((j,id,f,v) => setJours(p=>({...p,[j]:{...p[j],taches:p[j].taches.map(t=>t.id===id?{...t,[f]:v}:t)}})),[]);
+  const addTache = j => { const t=mkTache(); setJours(p=>({...p,[j]:{...p[j],taches:[...p[j].taches,t]}})); setTacheActive({j,id:t.id}); };
+  const delTache = (j,id) => { setJours(p=>{const ts=p[j].taches.filter(t=>t.id!==id); return {...p,[j]:{...p[j],taches:ts.length?ts:[mkTache()]}};}); setTacheActive(null); };
+
+  const texteReleve = () => {
+    const L="─".repeat(48);
+    let c="RELEVÉ HEBDOMADAIRE — Plomberie JL\n"+L+"\n\nNom : "+info.nom+"\nSemaine du "+info.semaineDebut+" au "+info.semaineFin+"\n\n"+L+"\n";
+    JOURS.forEach(j => {
+      const jr=jours[j]; const h=hJour(j);
+      const act=jr.taches.filter(t=>t.chantier||t.heureDebut);
+      if(!act.length) return;
+      c+="\n▸ "+j.toUpperCase()+"  ("+(h||"—")+")\n";
+      act.forEach((t,i) => {
+        c+="\n  "+(i+1)+". "+(t.chantier||"—")+"\n";
+        if(t.description) c+="     "+t.description+"\n";
+        if(t.heureDebut&&t.heureFin) c+="     "+t.heureDebut+" → "+t.heureFin+"  ("+(fmt(mins(t))||"—")+")\n";
       });
+      const ps=[];
+      if(jr.pauseMatin) ps.push("Pause matin 15min");
+      if(jr.diner) ps.push("Dîner 30min");
+      if(jr.pauseApm) ps.push("Pause a-m 15min");
+      if(ps.length) c+="\n  Pauses : "+ps.join(", ")+"\n";
+    });
+    c+="\n"+L+"\nTOTAL : "+total()+"\n";
+    return c;
+  };
 
-      const renderTacheModal = () => {
-        if (!tacheActive) return null;
-        const { jour, tacheId } = tacheActive;
-        const t = jours[jour]?.taches?.find(x => x.id===tacheId);
-        if (!t) return null;
-        return <TacheForm t={t} jour={jour} onUpdate={(f,v) => updateTache(jour,tacheId,f,v)} onClose={() => setTacheActive(null)} onDelete={() => supprimerTache(jour,tacheId)} />;
-      };
+  const copier = () => {
+    navigator.clipboard.writeText(texteReleve()).then(() => {
+      setShowEmail(false);
+      setCopied(true);
+      setTimeout(()=>setCopied(false), 5000);
+    });
+  };
 
-      // ── INFO ──
-      if (step==="info") return (
-        <div style={{minHeight:"100vh",background:"#f0f4f8"}}>
-          {showEmailModal && <EmailModal />}
-          <CopiedBanner />
-          <div style={{background:"#1a2a3a",padding:"20px 16px 16px",color:"#fff"}}>
-            <div style={{fontSize:11,opacity:0.6,letterSpacing:"0.12em",textTransform:"uppercase"}}>Plomberie JL</div>
-            <div style={{fontSize:20,fontWeight:700,marginTop:2}}>Relevé Hebdomadaire</div>
-            <div style={{fontSize:12,opacity:0.5,marginTop:2}}>💾 Sauvegardé automatiquement</div>
+  const Banner = () => copied ? (
+    <div style={{position:"fixed",top:0,left:0,right:0,zIndex:300,background:"#2e7d32",color:"#fff",textAlign:"center",padding:14,fontSize:15,fontWeight:700}}>
+      ✓ Relevé copié! Ouvre Gmail et colle-le dans le message.
+    </div>
+  ) : null;
+
+  const EmailModal = () => (
+    <div style={{position:"fixed",inset:0,background:"#0007",zIndex:100,display:"flex",alignItems:"flex-end"}}>
+      <div style={{background:"#fff",borderRadius:"16px 16px 0 0",padding:20,width:"100%",boxSizing:"border-box"}}>
+        <div style={{fontSize:16,fontWeight:700,marginBottom:4}}>📧 Envoyer par courriel</div>
+        <div style={{fontSize:13,color:"#5a6a7a",marginBottom:16}}>2 étapes simples :</div>
+        <Field label="Courriel du destinataire" value={info.email} onSave={v=>setInfoF("email",v)} type="email" placeholder="bureau@plomberiejl.com" />
+        <button onClick={copier} style={{width:"100%",padding:14,background:"#1565c0",color:"#fff",border:"none",borderRadius:10,fontSize:15,fontWeight:700,cursor:"pointer",marginBottom:8}}>
+          1️⃣ Copier le relevé
+        </button>
+        <a href={"https://mail.google.com/mail/?view=cm&to="+encodeURIComponent(info.email)+"&su="+encodeURIComponent("Relevé heures — "+info.nom+" — Semaine du "+info.semaineDebut)} target="_blank" style={{display:"block",width:"100%",padding:13,background:"#ea4335",color:"#fff",border:"none",borderRadius:10,fontSize:15,fontWeight:700,cursor:"pointer",marginBottom:10,textAlign:"center",textDecoration:"none",boxSizing:"border-box"}}>
+          2️⃣ Ouvrir Gmail et coller
+        </a>
+        <button onClick={()=>setShowEmail(false)} style={{width:"100%",padding:12,background:"#f0f4f8",color:"#5a6a7a",border:"1.5px solid #dde3ea",borderRadius:10,fontSize:14,fontWeight:600,cursor:"pointer"}}>Annuler</button>
+      </div>
+    </div>
+  );
+
+  const TacheModal = () => {
+    if(!tacheActive) return null;
+    const {j,id} = tacheActive;
+    const t = jours[j]?.taches?.find(x=>x.id===id);
+    if(!t) return null;
+    return (
+      <div style={{position:"fixed",inset:0,background:"#f0f4f8",zIndex:50,overflowY:"auto"}}>
+        <div style={{background:"#1a2a3a",padding:16,color:"#fff",display:"flex",alignItems:"center",gap:10}}>
+          <span onClick={()=>setTacheActive(null)} style={{fontSize:24,cursor:"pointer"}}>←</span>
+          <div style={{flex:1}}>
+            <div style={{fontSize:11,opacity:0.6,textTransform:"uppercase"}}>{j}</div>
+            <div style={{fontSize:16,fontWeight:700}}>{t.chantier||"Nouvelle entrée"}</div>
           </div>
-          <div style={{padding:16}}>
-            <Card>
-              <CardTitle>👤 Ton nom</CardTitle>
-              <StableInput label="Nom" value={info.nom} onBlur={v => updateInfo("nom",v)} placeholder="Ton nom complet" />
-            </Card>
-            <Card>
-              <CardTitle>📅 Semaine</CardTitle>
-              <div style={{display:"flex",gap:10}}>
-                <div style={{flex:1}}><StableInput label="Du" value={info.semaineDebut} onBlur={v => updateInfo("semaineDebut",v)} type="date" /></div>
-                <div style={{flex:1}}><StableInput label="Au" value={info.semaineFin} onBlur={v => updateInfo("semaineFin",v)} type="date" /></div>
+          <button onClick={()=>delTache(j,id)} style={{background:"#c62828",color:"#fff",border:"none",borderRadius:8,padding:"6px 12px",fontSize:13,cursor:"pointer"}}>Supprimer</button>
+        </div>
+        <div style={{padding:14}}>
+          <Card>
+            <Title>🏗 Chantier</Title>
+            <Field label="Nom du chantier" value={t.chantier} onSave={v=>setTacheF(j,id,"chantier",v)} placeholder="Ex: Résidence Tremblay" />
+            <Field label="Description des travaux" value={t.description} onSave={v=>setTacheF(j,id,"description",v)} placeholder="Ex: Sleevage, raccordement..." />
+          </Card>
+          <Card>
+            <Title>⏰ Heures</Title>
+            <div style={{display:"flex",gap:12,marginBottom:12}}>
+              <TimeField label="Début" value={t.heureDebut} onChange={v=>setTacheF(j,id,"heureDebut",v)} />
+              <TimeField label="Fin" value={t.heureFin} onChange={v=>setTacheF(j,id,"heureFin",v)} />
+            </div>
+            {fmt(mins(t)) && (
+              <div style={{background:"#e8f4fd",borderRadius:8,padding:10,textAlign:"center"}}>
+                <span style={{fontSize:16,color:"#1565c0",fontWeight:700}}>⏱ {fmt(mins(t))}</span>
               </div>
-            </Card>
-            <Card mb={20}>
-              <CardTitle>📧 Courriel</CardTitle>
-              <StableInput label="Envoyer à" value={info.emailDestinataire} onBlur={v => updateInfo("emailDestinataire",v)} type="email" placeholder="bureau@plomberiejl.com" />
-            </Card>
-            <button onClick={() => setStep("jours")} style={{width:"100%",padding:15,background:"#1a2a3a",color:"#fff",border:"none",borderRadius:10,fontSize:16,fontWeight:700,cursor:"pointer"}}>Saisir les heures →</button>
+            )}
+          </Card>
+          <button onClick={()=>setTacheActive(null)} style={{width:"100%",padding:15,background:"#2e7d32",color:"#fff",border:"none",borderRadius:10,fontSize:16,fontWeight:700,cursor:"pointer"}}>✓ Enregistrer</button>
+        </div>
+      </div>
+    );
+  };
+
+  if(step==="info") return (
+    <div style={{minHeight:"100vh",background:"#f0f4f8"}}>
+      {showEmail && <EmailModal />}
+      <Banner />
+      <div style={{background:"#1a2a3a",padding:"20px 16px 16px",color:"#fff"}}>
+        <div style={{fontSize:11,opacity:0.6,letterSpacing:"0.12em",textTransform:"uppercase"}}>Plomberie JL</div>
+        <div style={{fontSize:20,fontWeight:700,marginTop:2}}>Relevé Hebdomadaire</div>
+        <div style={{fontSize:12,opacity:0.5,marginTop:2}}>💾 Sauvegardé automatiquement</div>
+      </div>
+      <div style={{padding:16}}>
+        <Card><Title>👤 Ton nom</Title>
+          <Field label="Nom" value={info.nom} onSave={v=>setInfoF("nom",v)} placeholder="Ton nom complet" />
+        </Card>
+        <Card><Title>📅 Semaine</Title>
+          <div style={{display:"flex",gap:10}}>
+            <div style={{flex:1}}><Field label="Du" value={info.semaineDebut} onSave={v=>setInfoF("semaineDebut",v)} type="date" /></div>
+            <div style={{flex:1}}><Field label="Au" value={info.semaineFin} onSave={v=>setInfoF("semaineFin",v)} type="date" /></div>
+          </div>
+        </Card>
+        <Card mb={20}><Title>📧 Courriel</Title>
+          <Field label="Envoyer à" value={info.email} onSave={v=>setInfoF("email",v)} type="email" placeholder="bureau@plomberiejl.com" />
+        </Card>
+        <button onClick={()=>setStep("jours")} style={{width:"100%",padding:15,background:"#1a2a3a",color:"#fff",border:"none",borderRadius:10,fontSize:16,fontWeight:700,cursor:"pointer"}}>Saisir les heures →</button>
+      </div>
+    </div>
+  );
+
+  if(step==="jours") {
+    const jr = jours[jourActif];
+    return (
+      <div style={{minHeight:"100vh",background:"#f0f4f8"}}>
+        {showEmail && <EmailModal />}
+        <Banner />
+        <TacheModal />
+        <div style={{background:"#1a2a3a",padding:"16px 16px 0",color:"#fff"}}>
+          <div style={{display:"flex",alignItems:"center",marginBottom:10}}>
+            <span onClick={()=>setStep("info")} style={{fontSize:24,marginRight:10,cursor:"pointer"}}>←</span>
+            <div style={{flex:1}}>
+              <div style={{fontSize:11,opacity:0.6,textTransform:"uppercase"}}>Mes heures</div>
+              <div style={{fontSize:17,fontWeight:700}}>{info.nom||"—"}</div>
+            </div>
+            <button onClick={()=>setStep("resume")} style={{background:"#2e7d32",color:"#fff",border:"none",borderRadius:8,padding:"7px 14px",fontSize:13,fontWeight:700,cursor:"pointer"}}>Résumé →</button>
+          </div>
+          <div style={{display:"flex",gap:4,overflowX:"auto"}}>
+            {JOURS.map(j => {
+              const h=hJour(j); const a=j===jourActif;
+              return (
+                <div key={j} onClick={()=>setJourActif(j)} style={{flex:"0 0 auto",padding:"8px 10px",borderRadius:"8px 8px 0 0",cursor:"pointer",background:a?"#f0f4f8":"transparent",color:a?"#1a2a3a":"#99aacc",minWidth:56,textAlign:"center"}}>
+                  <div style={{fontSize:11,fontWeight:700}}>{j.slice(0,3).toUpperCase()}</div>
+                  {h && <div style={{fontSize:10,color:a?"#1565c0":"#5a8aaa",marginTop:2}}>{h}</div>}
+                </div>
+              );
+            })}
           </div>
         </div>
-      );
-
-      // ── JOURS ──
-      if (step==="jours") {
-        const jour = jours[jourActif];
-        return (
-          <div style={{minHeight:"100vh",background:"#f0f4f8"}}>
-            {showEmailModal && <EmailModal />}
-            <CopiedBanner />
-            {renderTacheModal()}
-            <div style={{background:"#1a2a3a",padding:"16px 16px 0",color:"#fff"}}>
-              <div style={{display:"flex",alignItems:"center",marginBottom:10}}>
-                <span onClick={() => setStep("info")} style={{fontSize:24,marginRight:10,cursor:"pointer"}}>←</span>
-                <div style={{flex:1}}>
-                  <div style={{fontSize:11,opacity:0.6,textTransform:"uppercase"}}>Mes heures</div>
-                  <div style={{fontSize:17,fontWeight:700}}>{info.nom||"—"}</div>
-                </div>
-                <button onClick={() => setStep("resume")} style={{background:"#2e7d32",color:"#fff",border:"none",borderRadius:8,padding:"7px 14px",fontSize:13,fontWeight:700,cursor:"pointer"}}>Résumé →</button>
+        <div style={{padding:14}}>
+          <Card>
+            <Title>⏸ Pauses — {jourActif}</Title>
+            <Toggle label="☕ Pause matin — 15 min" checked={jr.pauseMatin} onChange={v=>setJourF(jourActif,"pauseMatin",v)} />
+            <Toggle label="🍽 Dîner — 30 min" checked={jr.diner} onChange={v=>setJourF(jourActif,"diner",v)} />
+            <Toggle label="☕ Pause après-midi — 15 min" checked={jr.pauseApm} onChange={v=>setJourF(jourActif,"pauseApm",v)} />
+            {hJour(jourActif) && (
+              <div style={{background:"#1a2a3a",borderRadius:8,padding:10,textAlign:"center",marginTop:6}}>
+                <span style={{fontSize:15,color:"#fff",fontWeight:700}}>Total {jourActif} : {hJour(jourActif)}</span>
               </div>
-              <div style={{display:"flex",gap:4,overflowX:"auto"}}>
-                {JOURS.map(j => {
-                  const h = heuresJour(j); const actif = j===jourActif;
-                  return (
-                    <div key={j} onClick={() => setJourActif(j)} style={{flex:"0 0 auto",padding:"8px 10px",borderRadius:"8px 8px 0 0",cursor:"pointer",background:actif?"#f0f4f8":"transparent",color:actif?"#1a2a3a":"#99aacc",minWidth:56,textAlign:"center"}}>
-                      <div style={{fontSize:11,fontWeight:700}}>{j.slice(0,3).toUpperCase()}</div>
-                      {h && <div style={{fontSize:10,color:actif?"#1565c0":"#5a8aaa",marginTop:2}}>{h}</div>}
-                    </div>
-                  );
-                })}
+            )}
+          </Card>
+          <div style={{fontSize:12,fontWeight:700,color:"#5a6a7a",textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:8}}>Entrées du jour ({jr.taches.length})</div>
+          {jr.taches.map((t,i) => (
+            <div key={t.id} onClick={()=>setTacheActive({j:jourActif,id:t.id})} style={{background:"#fff",borderRadius:10,padding:"13px 14px",marginBottom:8,boxShadow:"0 1px 3px #0001",cursor:"pointer",borderLeft:"4px solid "+(t.chantier?"#1565c0":"#dde3ea"),display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div style={{flex:1}}>
+                <div style={{fontSize:13,fontWeight:700,color:t.chantier?"#1a2a3a":"#bbb"}}>{t.chantier||"Entrée "+(i+1)+" — vide"}</div>
+                {t.description && <div style={{fontSize:12,color:"#5a6a7a",marginTop:2}}>{t.description}</div>}
+                {t.heureDebut&&t.heureFin && <div style={{fontSize:12,color:"#888",marginTop:2}}>{t.heureDebut} → {t.heureFin}</div>}
+              </div>
+              <div style={{textAlign:"right",marginLeft:10}}>
+                {fmt(mins(t)) ? <div style={{fontSize:18,fontWeight:700,color:"#1a2a3a"}}>{fmt(mins(t))}</div> : <div style={{fontSize:12,color:"#ccc"}}>—</div>}
+                <div style={{fontSize:10,color:"#aaa",marginTop:2}}>modifier →</div>
               </div>
             </div>
-            <div style={{padding:14}}>
-              <Card>
-                <CardTitle>⏸ Pauses — {jourActif}</CardTitle>
-                <Toggle label="☕ Pause matin — 15 min" checked={jour.pauseMatin} onChange={v => updateJour(jourActif,"pauseMatin",v)} />
-                <Toggle label="🍽 Dîner — 30 min" checked={jour.diner} onChange={v => updateJour(jourActif,"diner",v)} />
-                <Toggle label="☕ Pause après-midi — 15 min" checked={jour.pauseApm} onChange={v => updateJour(jourActif,"pauseApm",v)} />
-                {heuresJour(jourActif) && (
-                  <div style={{background:"#1a2a3a",borderRadius:8,padding:10,textAlign:"center",marginTop:6}}>
-                    <span style={{fontSize:15,color:"#fff",fontWeight:700}}>Total {jourActif} : {heuresJour(jourActif)}</span>
+          ))}
+          <button onClick={()=>addTache(jourActif)} style={{width:"100%",padding:13,background:"#e8f4fd",color:"#1565c0",border:"2px dashed #90caf9",borderRadius:10,fontSize:15,fontWeight:700,cursor:"pointer",marginBottom:16}}>+ Ajouter une entrée</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{minHeight:"100vh",background:"#f0f4f8"}}>
+      {showEmail && <EmailModal />}
+      <Banner />
+      <div style={{background:"#1a2a3a",padding:16,color:"#fff",display:"flex",alignItems:"center",gap:10}}>
+        <span onClick={()=>setStep("jours")} style={{fontSize:24,cursor:"pointer"}}>←</span>
+        <div>
+          <div style={{fontSize:11,opacity:0.6,textTransform:"uppercase"}}>Résumé</div>
+          <div style={{fontSize:17,fontWeight:700}}>{info.nom}</div>
+        </div>
+      </div>
+      <div style={{padding:14}}>
+        <div style={{background:"#1a2a3a",borderRadius:12,padding:18,marginBottom:12,color:"#fff",textAlign:"center"}}>
+          <div style={{fontSize:11,opacity:0.6,textTransform:"uppercase",letterSpacing:"0.1em"}}>Total de la semaine</div>
+          <div style={{fontSize:52,fontWeight:700,marginTop:4,letterSpacing:"-2px"}}>{total()}</div>
+          {info.semaineDebut && <div style={{fontSize:12,opacity:0.5,marginTop:4}}>{info.semaineDebut} → {info.semaineFin}</div>}
+        </div>
+        {JOURS.map(j => {
+          const jr=jours[j]; const h=hJour(j);
+          const act=jr.taches.filter(t=>t.chantier||t.heureDebut);
+          if(!act.length) return null;
+          return (
+            <Card key={j} mb={10}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                <div style={{fontSize:14,fontWeight:700,color:"#1a2a3a"}}>{j}</div>
+                {h && <div style={{fontSize:16,fontWeight:700,color:"#1565c0"}}>{h}</div>}
+              </div>
+              {act.map((t,i) => (
+                <div key={t.id} onClick={()=>{setJourActif(j);setTacheActive({j,id:t.id});setStep("jours");}} style={{background:"#f8fafc",borderRadius:8,padding:"9px 12px",marginBottom:6,borderLeft:"3px solid #1565c0",cursor:"pointer"}}>
+                  <div style={{display:"flex",justifyContent:"space-between"}}>
+                    <div style={{fontSize:13,fontWeight:600,color:"#1a2a3a"}}>{t.chantier||"Entrée "+(i+1)}</div>
+                    {fmt(mins(t)) && <div style={{fontSize:13,fontWeight:700}}>{fmt(mins(t))}</div>}
                   </div>
-                )}
-              </Card>
-              <div style={{fontSize:12,fontWeight:700,color:"#5a6a7a",textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:8}}>Entrées du jour ({jour.taches.length})</div>
-              {jour.taches.map((t,i) => (
-                <div key={t.id} onClick={() => setTacheActive({jour:jourActif,tacheId:t.id})} style={{background:"#fff",borderRadius:10,padding:"13px 14px",marginBottom:8,boxShadow:"0 1px 3px #0001",cursor:"pointer",borderLeft:`4px solid ${t.chantier?"#1565c0":"#dde3ea"}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                  <div style={{flex:1}}>
-                    <div style={{fontSize:13,fontWeight:700,color:t.chantier?"#1a2a3a":"#bbb"}}>{t.chantier||`Entrée ${i+1} — vide`}</div>
-                    {t.description && <div style={{fontSize:12,color:"#5a6a7a",marginTop:2}}>{t.description}</div>}
-                    {t.heureDebut&&t.heureFin && <div style={{fontSize:12,color:"#888",marginTop:2}}>{t.heureDebut} → {t.heureFin}</div>}
-                  </div>
-                  <div style={{textAlign:"right",marginLeft:10}}>
-                    {fmtTache(t) ? <div style={{fontSize:18,fontWeight:700,color:"#1a2a3a"}}>{fmtTache(t)}</div> : <div style={{fontSize:12,color:"#ccc"}}>—</div>}
-                    <div style={{fontSize:10,color:"#aaa",marginTop:2}}>modifier →</div>
-                  </div>
+                  {t.description && <div style={{fontSize:12,color:"#5a6a7a",marginTop:2}}>{t.description}</div>}
+                  {t.heureDebut&&t.heureFin && <div style={{fontSize:11,color:"#888",marginTop:2}}>{t.heureDebut} → {t.heureFin}</div>}
                 </div>
               ))}
-              <button onClick={() => ajouterTache(jourActif)} style={{width:"100%",padding:13,background:"#e8f4fd",color:"#1565c0",border:"2px dashed #90caf9",borderRadius:10,fontSize:15,fontWeight:700,cursor:"pointer",marginBottom:16}}>+ Ajouter une entrée</button>
-            </div>
-          </div>
-        );
-      }
+            </Card>
+          );
+        })}
+        <div style={{marginTop:14}}>
+          <button onClick={()=>setShowEmail(true)} style={{width:"100%",padding:15,background:"#1565c0",color:"#fff",border:"none",borderRadius:10,fontSize:16,fontWeight:700,cursor:"pointer",marginBottom:10}}>📧 Envoyer par courriel</button>
+          <button onClick={()=>{setInfo({...mkInfo(),nom:info.nom,email:info.email});setJours(Object.fromEntries(JOURS.map(j=>[j,mkJour()])));setStep("info");}} style={{width:"100%",padding:13,background:"#f0f4f8",color:"#5a6a7a",border:"1.5px solid #dde3ea",borderRadius:10,fontSize:14,fontWeight:600,cursor:"pointer"}}>🗑 Nouveau relevé</button>
+        </div>
+        <div style={{textAlign:"center",fontSize:11,color:"#bbb",marginTop:14}}>💾 Données sauvegardées sur cet appareil</div>
+      </div>
+    </div>
+  );
+}
 
-      // ── RÉSUMÉ ──
-      return (
-        <div style={{minHeight:"100vh",background:"#f0f4f8"}}>
-          {showEmailModal && <EmailModal />}
-          <CopiedBanner />
-          <div style={{background:"#1a2a3a",padding:"16px",color:"#fff",display:"flex",alignItems:"center",gap:10}}>
-            <span onClick={() => setStep("jours")} style={{fontSize:24,cursor:"pointer"}}>←</span>
-            <div>
-              <div style={{fontSize:11,opacity:0.6,textTransform:"uppercase"}}>Résumé</div>
-              <div style={{fontSize:17,fontWeight:700}}>{info.nom}</div>
-            </div>
-          </div>
-          <div style={{padding:14}}>
-            <div style={{background:"#1a2a3a",borderRadius:12,padding:18,marginBottom:12,color:"#fff",textAlign:"center"}}>
-              <div style={{fontSize:11,opacity:0.6,textTransform:"uppercase",letterSpacing:"0.1em"}}>Total de la semaine</div>
-              <div style={{fontSize:52,fontWeight:700,marginTop:4,letterSpacing:"-2px"}}>{totalHeures()}</div>
-              {info.semaineDebut && <div style={{fontSize:12,opacity:0.5,marginTop:4}}>{info.semaineDebut} → {info.semaineFin}</div>}
-            </div>
-            {JOURS.map(j => {
-              const jour = jours[j]; const h = heuresJour(j);
-              const actives = jour.taches.filter(t => t.chantier||t.heureDebut);
-              if (!actives.length) return null;
-              return (
-                <div key={j} style={{background:"#fff",borderRadius:12,padding:16,marginBottom:10,boxShadow:"0 1px 4px #0001"}}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-                    <div style={{fontSize:14,fontWeight:700,color:"#1a2a3a"}}>{j}</div>
-                    {h && <div style={{fontSize:16,fontWeight:700,color:"#1565c0"}}>{h}</div>}
-                  </div>
-                  {actives.map((t,i) => (
-                    <div key={t.id} onClick={() => {setJourActif(j);setTacheActive({jour:j,tacheId:t.id});setStep("jours");}} style={{background:"#f8fafc",borderRadius:8,padding:"9px 12px",marginBottom:6,borderLeft:"3px solid #1565c0",cursor:"pointer"}}>
-                      <div style={{display:"flex",justifyContent:"space-between"}}>
-                        <div style={{fontSize:13,fontWeight:600,color:"#1a2a3a"}}>{t.chantier||`Entrée ${i+1}`}</div>
-                        {fmtTache(t) && <div style={{fontSize:13,fontWeight:700}}>{fmtTache(t)}</div>}
-                      </div>
-                      {t.description && <div style={{fontSize:12,color:"#5a6a7a",marginTop:2}}>{t.description}</div>}
-                      {t.heureDebut&&t.heureFin && <div style={{fontSize:11,color:"#888",marginTop:2}}>{t.heureDebut} → {t.heureFin}</div>}
-                    </div>
-                  ))}
-                </div>
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
